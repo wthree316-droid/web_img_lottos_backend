@@ -1,0 +1,23 @@
+# 🐍 Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 📦 Virtual Environment
+venv/
+.venv/
+env/
+
+# 🔑 Environment Variables (สำคัญมาก ห้ามหลุด!)
+.env
+.env.*
+!.env.example
+
+# 🛠 IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 🐳 Docker (ถ้ามีไฟล์ log)
+*.log

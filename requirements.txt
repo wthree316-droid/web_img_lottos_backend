@@ -1,0 +1,21 @@
+# ============================================
+# Lottery Generator Backend Dependencies
+# Version: 2.0 (Updated Feb 2026)
+# Python: 3.11+
+# ============================================
+
+# Core Framework
+fastapi==0.128.2
+uvicorn[standard]==0.32.1
+pydantic==2.10.5
+
+# Database
+supabase==2.10.0
+
+# Security
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1  # ✅ Latest stable (4.2.2 does not exist in PyPI)
+
+# Utilities
+python-dotenv==1.0.1
+python-multipart==0.0.20

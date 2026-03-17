@@ -54,11 +54,14 @@ def execute_supabase(query_builder, max_retries=3):
             return query_builder.execute()
         except Exception as e:
             last_error = e
-            # ถ้าเป็น Error เกี่ยวกับ Socket/SSL ให้รอแป๊บแล้วลองใหม่
-            if "10035" in str(e) or "socket" in str(e).lower() or "ssl" in str(e).lower():
-                time.sleep(0.1 + (random.random() * 0.2)) # รอ 0.1 - 0.3 วินาที
+            err_str = str(e).lower()
+            
+            # ✅ เพิ่มคำว่า "streamreset" และ "remote_reset" เข้าไป เพื่อให้มันยิงใหม่เวลา Supabase ตัดสาย
+            if "10035" in err_str or "socket" in err_str or "ssl" in err_str or "streamreset" in err_str or "remote_reset" in err_str:
+                time.sleep(0.2 + (random.random() * 0.3)) # รอ 0.2 - 0.5 วินาที
                 continue
             raise e # ถ้าเป็น Error อื่น (เช่น SQL ผิด) ให้โยนทิ้งเลย
+            
     raise last_error
 
 app = FastAPI()

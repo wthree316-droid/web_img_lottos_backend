@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from database import supabase 
 from schemas import (
@@ -12,12 +12,42 @@ from passlib.context import CryptContext
 import os
 from dotenv import load_dotenv
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import time
 import random
 
+import jwt # ✅ เพิ่ม import jwt
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials # ✅ เพิ่มตัวจัดการ Auth
+
 load_dotenv()
+
+# ✅ ตั้งค่า JWT (รหัสลับสำหรับเข้ารหัส)
+JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-lotto-key-please-change-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # Token มีอายุ 7 วัน
+
+security = HTTPBearer()
+
+# ✅ ฟังก์ชันสำหรับสร้าง Token
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
+
+# ✅ ด่านตรวจยาม (Dependency) สำหรับเช็ค Token ทุกครั้งที่ยิง API
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+        if payload.get("sub") is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return payload # คืนค่าข้อมูล User ที่อยู่ใน Token กลับไป
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired (กรุณาล็อกอินใหม่)")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 # ตั้งค่าสำหรับ Hash Password
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -265,8 +295,41 @@ def update_template(template_id: str, request: TemplateCreate):
 @app.delete("/api/templates/{template_id}")
 def delete_template(template_id: str):
     try:
-        res = execute_supabase(supabase.table("templates").delete().eq("id", template_id))
-        return {"message": "Deleted successfully"}
+        # 1. ค้นหารูปภาพที่เชื่อมโยงกับแม่พิมพ์นี้ก่อน (ภาพหลัก + ภาพทางเลือก)
+        urls_to_delete = []
+        
+        # ดึงภาพหลัก
+        temp_res = execute_supabase(supabase.table("templates").select("background_url").eq("id", template_id).limit(1))
+        if temp_res.data and temp_res.data[0].get("background_url"):
+            urls_to_delete.append(temp_res.data[0]["background_url"])
+            
+        # ดึงภาพทางเลือก
+        bg_res = execute_supabase(supabase.table("template_backgrounds").select("url").eq("template_id", template_id))
+        if bg_res.data:
+            for bg in bg_res.data:
+                if bg.get("url"):
+                    urls_to_delete.append(bg["url"])
+
+        # 2. ลบข้อมูลออกจาก Database
+        execute_supabase(supabase.table("template_slots").delete().eq("template_id", template_id))
+        execute_supabase(supabase.table("template_backgrounds").delete().eq("template_id", template_id))
+        execute_supabase(supabase.table("templates").delete().eq("id", template_id))
+
+        # 3. ลบไฟล์ใน Supabase Storage
+        if urls_to_delete:
+            paths_to_delete = []
+            for url in urls_to_delete:
+                if "lotto-assets/" in url:
+                    file_path = url.split("lotto-assets/")[1]
+                    paths_to_delete.append(file_path)
+            
+            if paths_to_delete:
+                try:
+                    supabase.storage.from_("lotto-assets").remove(paths_to_delete)
+                except Exception as storage_err:
+                    print(f"⚠️ Failed to delete images from storage: {storage_err}")
+
+        return {"message": "Deleted successfully and cleaned up storage"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -393,7 +456,24 @@ def login(request: UserLogin):
         if not user.data: raise HTTPException(status_code=401, detail="Invalid credentials")
         if not safe_verify_password(request.password, user.data[0]['password']):
              raise HTTPException(status_code=401, detail="Invalid credentials")
-        return {k: v for k, v in user.data[0].items() if k != 'password'}
+        
+        user_data = {k: v for k, v in user.data[0].items() if k != 'password'}
+        
+        # ✅ สร้าง JWT Token ให้
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user_data["username"], "id": user_data["id"], "role": user_data["role"]},
+            expires_delta=access_token_expires
+        )
+
+        # ✅ ส่ง Token คืนไปให้เว็บเอาไปเซฟ
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": user_data
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Login Error: {e}")
         raise HTTPException(status_code=401, detail="Login failed")
@@ -458,7 +538,12 @@ def update_user(user_id: str, request: UserUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/users/{user_id}")
-def delete_user(user_id: str):
+def delete_user(user_id: str, current_user: dict = Depends(get_current_user)): # ✅ แปะตรงนี้
+    
+    # ✅ ตรวจว่าคนที่ยิงมาเป็น Admin หรือเปล่า
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="คุณไม่มีสิทธิ์ใช้งานส่วนนี้")
+
     try:
         execute_supabase(supabase.table("users").delete().eq("id", user_id))
         return {"message": "User deleted successfully"}

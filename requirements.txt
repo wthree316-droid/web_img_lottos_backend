@@ -19,3 +19,4 @@ bcrypt==4.0.1  # ✅ Latest stable (4.2.2 does not exist in PyPI)
 # Utilities
 python-dotenv==1.0.1
 python-multipart==0.0.20
+pyjwt

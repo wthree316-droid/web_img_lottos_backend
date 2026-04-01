@@ -1,0 +1,10 @@
+Database_Schema_Full.sql
+
+.env.example
+
+.gitignore
+
+PASSWORD_MIGRATION.md
+migrate_passwords.py
+QUICK_FIX.md
+README.md

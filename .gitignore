@@ -10,8 +10,8 @@ env/
 
 # 🔑 Environment Variables (สำคัญมาก ห้ามหลุด!)
 .env
+.env2
 .env.*
-.env.example
 
 # 🛠 IDE & OS
 .vscode/

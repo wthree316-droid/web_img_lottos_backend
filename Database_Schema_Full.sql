@@ -1,60 +1,81 @@
 -- ============================================
--- 🎰 LOTTERY GENERATOR DATABASE SCHEMA (FULL)
--- Version: 4.0 (Upgrade: Multi-style, Global Assets, Closing Time)
+-- 🎰 LOTTERY GENERATOR DATABASE SCHEMA (ULTIMATE FULL VERSION)
 -- Compatible with: PostgreSQL 14+ (Supabase)
+-- รวมฟีเจอร์: Multi-style, Global Assets, Closing Time, Personal Templates, QR/Line Configs
 -- ============================================
 
--- ⚠️ คำเตือน: สคริปต์นี้ออกแบบมาให้รันซ้ำได้ (Idempotent) 
--- แต่ถ้าต้องการล้างข้อมูลเก่าทั้งหมด ให้ Uncomment บรรทัดข้างล่างนี้:
--- DROP TABLE IF EXISTS global_configs, template_backgrounds, users, lotteries, template_slots, templates CASCADE;
--- DROP TYPE IF EXISTS slot_type_enum;
-
 -- ============================================
--- 1. SETUP ENUMS & TABLES
+-- 1. SETUP ENUMS
 -- ============================================
 
--- 1.1 สร้าง ENUM สำหรับประเภทของ Slot (อัปเดตให้รองรับ qr_code และ static_text)
+-- 1.1 สร้าง ENUM สำหรับประเภทของ Slot
 DO $$ BEGIN
     CREATE TYPE slot_type_enum AS ENUM ('system_label', 'user_input', 'auto_data', 'qr_code', 'static_text');
 EXCEPTION
-    WHEN duplicate_object THEN 
-        -- ถ้ามีอยู่แล้ว ให้เพิ่มค่า enum ใหม่เข้าไป
-        ALTER TYPE slot_type_enum ADD VALUE IF NOT EXISTS 'qr_code';
-        ALTER TYPE slot_type_enum ADD VALUE IF NOT EXISTS 'static_text';
+    WHEN duplicate_object THEN NULL;
 END $$;
 
--- 1.2 สร้างตารางแม่พิมพ์ (Templates) - เพิ่ม is_master
+-- เพื่อความชัวร์ (เผื่อมี enum เก่าอยู่ ให้เพิ่มค่าใหม่เข้าไป)
+ALTER TYPE slot_type_enum ADD VALUE IF NOT EXISTS 'qr_code';
+ALTER TYPE slot_type_enum ADD VALUE IF NOT EXISTS 'static_text';
+
+-- ============================================
+-- 2. SETUP TABLES (สร้างตารางหลัก)
+-- ============================================
+
+-- 2.1 สร้างตาราง Users ก่อน (เพื่อเอาไว้ผูกเป็นเจ้าของแม่พิมพ์)
+CREATE TABLE IF NOT EXISTS users (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    name TEXT,
+    role TEXT DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+    allowed_template_ids JSONB DEFAULT '[]'::JSONB, -- เก็บรายชื่อแม่พิมพ์ที่อนุญาต
+    custom_line_id TEXT,                            -- Line ID ส่วนตัว
+    custom_qr_code_url TEXT,                        -- รูป QR Code ส่วนตัว
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2.2 สร้างตารางแม่พิมพ์ (Templates)
 CREATE TABLE IF NOT EXISTS templates (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
     base_width INT NOT NULL DEFAULT 1080,
     base_height INT NOT NULL DEFAULT 1920,
-    background_url TEXT, -- รูปหลัก (Default)
-    is_master BOOLEAN DEFAULT FALSE, -- ✅ เป็นแม่พิมพ์หลักหรือไม่
+    background_url TEXT,
+    is_master BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
+    owner_id UUID REFERENCES users(id) ON DELETE CASCADE, -- ผูกเจ้าของแม่พิมพ์
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 1.3 สร้างตารางรูปพื้นหลังเพิ่มเติม (Template Backgrounds) - ✅ ตารางใหม่
+-- 2.3 กลับไปเพิ่ม Foreign Key ให้ Users (ผูกแม่พิมพ์เริ่มต้น)
+DO $$ BEGIN
+    ALTER TABLE users ADD COLUMN assigned_template_id UUID REFERENCES templates(id) ON DELETE SET NULL;
+EXCEPTION
+    WHEN duplicate_column THEN NULL;
+END $$;
+
+-- 2.4 สร้างตารางรูปพื้นหลังเพิ่มเติม (Template Backgrounds)
 CREATE TABLE IF NOT EXISTS template_backgrounds (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     template_id UUID REFERENCES templates(id) ON DELETE CASCADE,
-    name TEXT NOT NULL, -- ชื่อสไตล์ เช่น "สีแดงตรุษจีน", "สีเขียวเหนี่ยวทรัพย์"
+    name TEXT NOT NULL,
     url TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 1.4 สร้างตารางค่ากลาง (Global Configs) - ✅ ตารางใหม่
+-- 2.5 สร้างตารางค่ากลาง (Global Configs)
 CREATE TABLE IF NOT EXISTS global_configs (
-    key TEXT PRIMARY KEY, -- เช่น 'qr_code_url', 'line_id'
+    key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     description TEXT,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 1.5 สร้างตารางกล่องข้อมูล (Slots)
+-- 2.6 สร้างตารางกล่องข้อมูล (Slots)
 CREATE TABLE IF NOT EXISTS template_slots (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     template_id UUID REFERENCES templates(id) ON DELETE CASCADE,
@@ -70,37 +91,18 @@ CREATE TABLE IF NOT EXISTS template_slots (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 1.6 สร้างตารางรายชื่อหวย (เพิ่ม closing_time)
+-- 2.7 สร้างตารางรายชื่อหวย
 CREATE TABLE IF NOT EXISTS lotteries (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     template_id UUID REFERENCES templates(id) ON DELETE SET NULL,
-    closing_time TIMESTAMPTZ, -- ✅ เวลาปิดรับ (เช่น 15:30 ของทุกวัน)
+    closing_time TIMESTAMPTZ,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-DO $$ 
-BEGIN 
-    -- เพิ่ม column closing_time ถ้ายังไม่มี
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'lotteries' AND column_name = 'closing_time') THEN
-        ALTER TABLE lotteries ADD COLUMN closing_time TIMESTAMPTZ;
-    END IF;
-END $$;
-
--- 1.7 สร้างตาราง Users
-CREATE TABLE IF NOT EXISTS users (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    name TEXT,
-    role TEXT DEFAULT 'member' CHECK (role IN ('admin', 'member')),
-    assigned_template_id UUID REFERENCES templates(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- ============================================
--- 2. INDEXES & TRIGGERS
+-- 3. INDEXES & TRIGGERS (เพิ่มความเร็วการค้นหา)
 -- ============================================
 
 CREATE INDEX IF NOT EXISTS idx_template_slots_template_id ON template_slots(template_id);
@@ -108,7 +110,9 @@ CREATE INDEX IF NOT EXISTS idx_template_backgrounds_template_id ON template_back
 CREATE INDEX IF NOT EXISTS idx_lotteries_template_id ON lotteries(template_id);
 CREATE INDEX IF NOT EXISTS idx_users_assigned_template_id ON users(assigned_template_id);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_lotteries_closing_time ON lotteries(closing_time);
+CREATE INDEX IF NOT EXISTS idx_templates_owner_id ON templates(owner_id);
 
 -- Function สำหรับ update timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -132,7 +136,7 @@ FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
--- 3. ROW LEVEL SECURITY (RLS)
+-- 4. ROW LEVEL SECURITY (RLS)
 -- ============================================
 
 ALTER TABLE templates ENABLE ROW LEVEL SECURITY;
@@ -142,9 +146,11 @@ ALTER TABLE template_slots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lotteries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
--- เคลียร์ Policy เก่า
+-- เคลียร์ Policy เก่าทิ้งทั้งหมด เพื่อลง Policy ใหม่ที่อัปเดตแล้ว
 DROP POLICY IF EXISTS "Admins have full access to templates" ON templates;
 DROP POLICY IF EXISTS "Members can read templates" ON templates;
+DROP POLICY IF EXISTS "Members can read system and own templates" ON templates;
+DROP POLICY IF EXISTS "Members manage own templates" ON templates;
 DROP POLICY IF EXISTS "All authenticated users can read template_slots" ON template_slots;
 DROP POLICY IF EXISTS "All users can read active lotteries" ON lotteries;
 DROP POLICY IF EXISTS "Only admins can access users" ON users;
@@ -153,159 +159,64 @@ DROP POLICY IF EXISTS "Members can read backgrounds" ON template_backgrounds;
 DROP POLICY IF EXISTS "Admins can manage global configs" ON global_configs;
 DROP POLICY IF EXISTS "Everyone can read global configs" ON global_configs;
 
--- สร้าง Policy ใหม่
+-- 🛡️ POLICIES สำหรับ Users
+CREATE POLICY "Only admins can access users" ON users FOR ALL 
+USING (EXISTS (SELECT 1 FROM users u WHERE u.id::text = (current_setting('request.jwt.claims', true)::json->>'sub') AND u.role = 'admin'));
+
+-- 🛡️ POLICIES สำหรับ Templates
 CREATE POLICY "Admins have full access to templates" ON templates FOR ALL 
 USING (EXISTS (SELECT 1 FROM users WHERE users.id::text = (current_setting('request.jwt.claims', true)::json->>'sub') AND users.role = 'admin'));
 
-CREATE POLICY "Members can read templates" ON templates FOR SELECT 
-USING (EXISTS (SELECT 1 FROM users WHERE users.id::text = (current_setting('request.jwt.claims', true)::json->>'sub') AND users.role IN ('admin', 'member')));
+CREATE POLICY "Members can read system and own templates" ON templates FOR SELECT 
+USING (owner_id IS NULL OR owner_id::text = (current_setting('request.jwt.claims', true)::json->>'sub'));
 
+CREATE POLICY "Members manage own templates" ON templates FOR ALL
+USING (owner_id::text = (current_setting('request.jwt.claims', true)::json->>'sub'));
+
+-- 🛡️ POLICIES สำหรับ Backgrounds
 CREATE POLICY "Admins have full access to backgrounds" ON template_backgrounds FOR ALL 
 USING (EXISTS (SELECT 1 FROM users WHERE users.id::text = (current_setting('request.jwt.claims', true)::json->>'sub') AND users.role = 'admin'));
 
-CREATE POLICY "Members can read backgrounds" ON template_backgrounds FOR SELECT 
-USING (true);
+CREATE POLICY "Members can read backgrounds" ON template_backgrounds FOR SELECT USING (true);
 
+-- 🛡️ POLICIES สำหรับ Global Configs
 CREATE POLICY "Admins can manage global configs" ON global_configs FOR ALL 
 USING (EXISTS (SELECT 1 FROM users WHERE users.id::text = (current_setting('request.jwt.claims', true)::json->>'sub') AND users.role = 'admin'));
 
 CREATE POLICY "Everyone can read global configs" ON global_configs FOR SELECT USING (true);
 
+-- 🛡️ POLICIES สำหรับ Slots & Lotteries
 CREATE POLICY "All authenticated users can read template_slots" ON template_slots FOR SELECT USING (true);
 CREATE POLICY "All users can read active lotteries" ON lotteries FOR SELECT USING (is_active = true);
 
-CREATE POLICY "Only admins can access users" ON users FOR ALL 
-USING (EXISTS (SELECT 1 FROM users u WHERE u.id::text = (current_setting('request.jwt.claims', true)::json->>'sub') AND u.role = 'admin'));
 
 -- ============================================
--- 4. SEED DATA (ข้อมูลเริ่มต้น)
+-- 5. SEED DATA (ข้อมูลตัวอย่างเริ่มต้น)
 -- ============================================
 
--- 4.1 สร้าง Admin (ถ้ายังไม่มี)
+-- 5.1 สร้าง Admin (username: admin, password: 1234)
 INSERT INTO users (username, password, name, role)
 VALUES ('admin', '1234', 'Admin สูงสุด', 'admin')
 ON CONFLICT (username) DO NOTHING;
 
--- 4.2 สร้างค่ากลางเริ่มต้น (Global Configs)
+-- 5.2 สร้างค่ากลางเริ่มต้น
 INSERT INTO global_configs (key, value, description) VALUES
 ('qr_code_url', '', 'URL ของรูป QR Code กลาง'),
 ('line_id', '@lotto', 'LINE ID สำหรับติดต่อ')
 ON CONFLICT (key) DO NOTHING;
 
--- 4.3 เพิ่มรายชื่อหวย (ใช้ ON CONFLICT DO NOTHING เพื่อกันซ้ำ)
-
--- ==========================================
--- 1. หมวดหวยไทย (THAI)
--- ==========================================
-INSERT INTO lotteries (name, template_id) SELECT 'รัฐบาลไทย', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'รัฐบาลไทย 70', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ออมสิน', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ธกส', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-
--- ==========================================
--- 2. หมวดหวยลาว (LAOS)
--- ==========================================
-INSERT INTO lotteries (name, template_id) SELECT 'ลาวประตูชัย', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาวสันติภาพ', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ประชาชนลาว', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาว Extra', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาว TV', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาว HD', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาวสตาร์', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'หุ้นลาว VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาวพัฒนา', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'หวยลาวสามัคคี', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาวพัฒนา 70', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาวอาเซียน', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาวสามัคคี VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาว VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาวSTAR VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ลาว กาชาด', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-
--- ==========================================
--- 3. หมวดหวยฮานอย (HANOI)
--- ==========================================
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอยอาเซียน', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'เวียดนาม VIP เช้า', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอย HD', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอย สตาร์', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'เวียดนาม VIP บ่าย', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอย TV', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอย กาชาด', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอยเฉพาะกิจ', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'เวียดนาม VIP เย็น', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอยสามัคคี', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอยพิเศษ', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอยปกติ', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอยตรุษจีน', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอยพัฒนา', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอย VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอย 4D', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอย EXTRA', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮานอยดึก', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-
--- ==========================================
--- 4. หมวดหวยหุ้น (STOCKS)
--- ==========================================
-INSERT INTO lotteries (name, template_id) SELECT 'ดาวโจนส์ USA', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ดาวโจนส์', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'นิเคอิ เช้า', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'จีน เช้า', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮั่งเส็ง เช้า', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ไต้หวัน', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'เกาหลี', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'นิเคอิ บ่าย', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'จีน บ่าย', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮั่งเส็ง บ่าย', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ไทยเย็น', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'สิงคโปร์', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'อินเดีย', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'อิยิปต์', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'มาเลเซีย', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'อังกฤษ', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'เยอรมัน', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'รัสเซีย', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ยูโร', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-
--- ==========================================
--- 5. หมวดหวยหุ้น VIP (STOCKSVIP)
--- ==========================================
-INSERT INTO lotteries (name, template_id) SELECT 'ดาวโจนส์ VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ดาวโจนส์ STAR', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ดาวโจนส์ Mid Night', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ดาวโจนส์ Extra', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ดาวโจนส์ TV', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'นิเคอิเช้า VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'จีนเช้า VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮั่งเส็งเช้า VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ไต้หวัน VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'เกาหลี VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'นิเคอิบ่าย VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'จีนบ่าย VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'ฮั่งเส็งบ่าย VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'สิงคโปร์ VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'อินเดีย VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'อังกฤษ VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'เยอรมัน VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'รัสเซีย VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-
--- ==========================================
--- 6. หมวดอื่นๆ (OTHERS) - แม่โขง
--- ==========================================
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขงทูเดย์', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขง HD', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขงเมก้า', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขงสตาร์', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขงพลัส', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขงพิเศษ', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขงปกติ', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขง VIP', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขงพัฒนา', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขงโกลด์', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
-INSERT INTO lotteries (name, template_id) SELECT 'แม่โขงไนท์', id FROM templates LIMIT 1 ON CONFLICT (name) DO NOTHING;
+-- 5.3 เพิ่มรายชื่อหวย (ถ้ามีแล้วจะไม่ซ้ำ)
+INSERT INTO lotteries (name) VALUES 
+('รัฐบาลไทย'), ('รัฐบาลไทย 70'), ('ออมสิน'), ('ธกส'),
+('ลาวประตูชัย'), ('ลาวสันติภาพ'), ('ประชาชนลาว'), ('ลาว Extra'), ('ลาว TV'), ('ลาว HD'), ('ลาวสตาร์'), ('หุ้นลาว VIP'), ('ลาวพัฒนา'), ('หวยลาวสามัคคี'), ('ลาวพัฒนา 70'), ('ลาวอาเซียน'), ('ลาวสามัคคี VIP'), ('ลาว VIP'), ('ลาวSTAR VIP'), ('ลาว กาชาด'),
+('ฮานอยอาเซียน'), ('เวียดนาม VIP เช้า'), ('ฮานอย HD'), ('ฮานอย สตาร์'), ('เวียดนาม VIP บ่าย'), ('ฮานอย TV'), ('ฮานอย กาชาด'), ('ฮานอยเฉพาะกิจ'), ('เวียดนาม VIP เย็น'), ('ฮานอยสามัคคี'), ('ฮานอยพิเศษ'), ('ฮานอยปกติ'), ('ฮานอยตรุษจีน'), ('ฮานอยพัฒนา'), ('ฮานอย VIP'), ('ฮานอย 4D'), ('ฮานอย EXTRA'), ('ฮานอยดึก'),
+('ดาวโจนส์ USA'), ('ดาวโจนส์'), ('นิเคอิ เช้า'), ('จีน เช้า'), ('ฮั่งเส็ง เช้า'), ('ไต้หวัน'), ('เกาหลี'), ('นิเคอิ บ่าย'), ('จีน บ่าย'), ('ฮั่งเส็ง บ่าย'), ('ไทยเย็น'), ('สิงคโปร์'), ('อินเดีย'), ('อิยิปต์'), ('มาเลเซีย'), ('อังกฤษ'), ('เยอรมัน'), ('รัสเซีย'), ('ยูโร'),
+('ดาวโจนส์ VIP'), ('ดาวโจนส์ STAR'), ('ดาวโจนส์ Mid Night'), ('ดาวโจนส์ Extra'), ('ดาวโจนส์ TV'), ('นิเคอิเช้า VIP'), ('จีนเช้า VIP'), ('ฮั่งเส็งเช้า VIP'), ('ไต้หวัน VIP'), ('เกาหลี VIP'), ('นิเคอิบ่าย VIP'), ('จีนบ่าย VIP'), ('ฮั่งเส็งบ่าย VIP'), ('สิงคโปร์ VIP'), ('อินเดีย VIP'), ('อังกฤษ VIP'), ('เยอรมัน VIP'), ('รัสเซีย VIP'),
+('แม่โขงทูเดย์'), ('แม่โขง HD'), ('แม่โขงเมก้า'), ('แม่โขงสตาร์'), ('แม่โขงพลัส'), ('แม่โขงพิเศษ'), ('แม่โขงปกติ'), ('แม่โขง VIP'), ('แม่โขงพัฒนา'), ('แม่โขงโกลด์'), ('แม่โขงไนท์')
+ON CONFLICT (name) DO NOTHING;
 
 -- ============================================
--- 5. VIEWS & COMMENTS
+-- 6. VIEWS & COMMENTS
 -- ============================================
 
 CREATE OR REPLACE VIEW template_usage AS
@@ -324,6 +235,7 @@ COMMENT ON TABLE template_backgrounds IS 'เก็บรูปพื้นห�
 COMMENT ON TABLE global_configs IS 'เก็บค่ากลางของระบบ เช่น QR Code, Line ID';
 COMMENT ON TABLE template_slots IS 'กล่องข้อมูลภายในแม่พิมพ์';
 COMMENT ON TABLE lotteries IS 'รายชื่อหวยทั้งหมดในระบบ พร้อมเวลาปิดรับ';
-COMMENT ON TABLE users IS 'ผู้ใช้ระบบ (Admin/Member) - Password เก็บเป็น bcrypt hash';
+COMMENT ON TABLE users IS 'ผู้ใช้ระบบ (Admin/Member)';
 
--- ✅ DONE!
+-- 🔥 แจ้งเตือน Supabase ให้โหลด Schema ใหม่ (เพื่อให้ API อัปเดตทันที)
+NOTIFY pgrst, 'reload config';

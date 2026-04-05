@@ -1,4 +1,6 @@
 Database_Schema_Full.sql
+1_Database_Schema.sql
+2_Seed_Lotteries.sql
 
 .env.example
 

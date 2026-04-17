@@ -1,41 +1,30 @@
-"""
-Migration Script: Hash existing plain-text passwords in the database
-⚠️ รันสคริปต์นี้ครั้งเดียวหลังจาก deploy โค้ดใหม่แล้ว
+# Migration Script: Hash existing plain-text passwords in the database
+# ⚠️ รันสคริปต์นี้ครั้งเดียวหลังจาก deploy โค้ดใหม่แล้ว
 
-ขั้นตอนการใช้งาน:
-1. ตรวจสอบว่าตั้งค่า .env ถูกต้อง (SUPABASE_URL, SUPABASE_KEY)
-2. รันคำสั่ง: python migrate_passwords.py
-3. สคริปต์จะ hash password ทุกตัวที่ยังเป็น plain text
-"""
+# ขั้นตอนการใช้งาน:
+# 1. ตรวจสอบว่าตั้งค่า .env ถูกต้อง (SUPABASE_URL, SUPABASE_KEY)
+# 2. รันคำสั่ง: python migrate_passwords.py
+# 3. สคริปต์จะ hash password ทุกตัวที่ยังเป็น plain text 
 
 from database import supabase
 from passlib.context import CryptContext
 import sys
 import hashlib
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+import bcrypt
 
 def is_hashed(password: str) -> bool:
     """เช็คว่า password เป็น bcrypt hash หรือยัง"""
     return password.startswith("$2b$") or password.startswith("$2a$")
 
 def safe_hash_password(password: str) -> str:
-    """
-    Hash password โดยรองรับความยาวที่เกิน 72 bytes
-    bcrypt มีข้อจำกัดที่ 72 bytes ดังนั้นถ้า password ยาวเกิน
-    เราจะ hash ด้วย SHA256 ก่อน แล้วค่อย hash ด้วย bcrypt
-    """
-    # ตรวจสอบว่า password ยาวเกิน 72 bytes หรือไม่
     password_bytes = password.encode('utf-8')
-    
+    # กรณีพิเศษถ้า password ยาวเกิน 72 bytes ตาม logic เดิมของคุณ
     if len(password_bytes) > 72:
-        # ถ้ายาวเกิน 72 bytes ให้ hash ด้วย SHA256 ก่อน
-        # แล้วเอา hex digest (64 chars) มา hash ด้วย bcrypt
-        sha_hash = hashlib.sha256(password_bytes).hexdigest()
-        return pwd_context.hash(sha_hash)
-    else:
-        # ถ้าไม่เกิน 72 bytes ก็ hash ตรงๆ
-        return pwd_context.hash(password)
+        import hashlib
+        password = hashlib.sha256(password_bytes).hexdigest()
+    
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
 
 def migrate_passwords():
     """แปลง plain text passwords เป็น hashed passwords"""

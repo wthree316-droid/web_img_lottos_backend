@@ -55,6 +55,7 @@ class UserCreate(BaseModel):
     # ✅ เพิ่ม: รับค่า Config ตั้งแต่ตอนสร้างได้เลย (Optional)
     custom_line_id: Optional[str] = None
     custom_qr_code_url: Optional[str] = None
+    is_suspended: Optional[bool] = False
 
 class UserUpdate(BaseModel):
     password: Optional[str] = None
@@ -64,8 +65,8 @@ class UserUpdate(BaseModel):
     # ✅ เพิ่ม: สำหรับอัปเดต Line/QR ส่วนตัว
     custom_line_id: Optional[str] = None
     custom_qr_code_url: Optional[str] = None
+    is_suspended: Optional[bool] = None
 
-# ... (Schema อื่นๆ เหมือนเดิม) ...
 class UploadResponse(BaseModel):
     url: str
 
@@ -82,9 +83,11 @@ class LotteryCreate(BaseModel):
     template_id: Optional[str] = None
     closing_time: Optional[datetime] = None
     is_active: bool = True
+    icon_url: Optional[str] = None
 
 class LotteryUpdate(BaseModel):
     name: Optional[str] = None
     closing_time: Optional[datetime] = None
     is_active: Optional[bool] = None
     template_id: Optional[str] = None
+    icon_url: Optional[str] = None

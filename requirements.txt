@@ -13,7 +13,6 @@ pydantic==2.10.5
 supabase==2.10.0
 
 # Security
-passlib[bcrypt]==1.7.4
 bcrypt==4.0.1  # ✅ Latest stable (4.2.2 does not exist in PyPI)
 
 # Utilities

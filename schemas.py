@@ -81,13 +81,13 @@ class GlobalConfigResponse(BaseModel):
 class LotteryCreate(BaseModel):
     name: str
     template_id: Optional[str] = None
-    closing_time: Optional[datetime] = None
+    closing_time: Optional[str] = None
     is_active: bool = True
     icon_url: Optional[str] = None
 
 class LotteryUpdate(BaseModel):
     name: Optional[str] = None
-    closing_time: Optional[datetime] = None
+    closing_time: Optional[str] = None
     is_active: Optional[bool] = None
     template_id: Optional[str] = None
     icon_url: Optional[str] = None

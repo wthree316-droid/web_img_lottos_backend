@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 
 # ✅ 1. นำเข้า Router ทั้งหมดที่จัดระเบียบไว้
-from routers import auth, users, lotteries, templates, config, generate
+from routers import auth, users, lotteries, templates, config, generate, assets
 
 load_dotenv()
 
@@ -28,6 +28,7 @@ app.include_router(lotteries.router)
 app.include_router(templates.router)
 app.include_router(config.router)
 app.include_router(generate.router)
+app.include_router(assets.router)
 
 # ✅ 4. Base Routes สำหรับเช็คสถานะเซิร์ฟเวอร์
 @app.get("/")

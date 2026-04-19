@@ -72,7 +72,7 @@ def create_lottery(request: LotteryCreate):
         data = {
             "name": request.name,
             "template_id": request.template_id if request.template_id else None,
-            "closing_time": request.closing_time.isoformat() if request.closing_time else None,
+            "closing_time": request.closing_time,
             "is_active": request.is_active,
             "icon_url": request.icon_url
         }
@@ -86,7 +86,7 @@ def update_lottery(lottery_id: str, request: LotteryUpdate):
     try:
         update_data = {}
         if request.name is not None: update_data["name"] = request.name
-        if request.closing_time is not None: update_data["closing_time"] = request.closing_time.isoformat()
+        if request.closing_time is not None: update_data["closing_time"] = request.closing_time
         if request.is_active is not None: update_data["is_active"] = request.is_active
         if request.template_id is not None: update_data["template_id"] = request.template_id if request.template_id else None
         if request.icon_url is not None: update_data["icon_url"] = request.icon_url

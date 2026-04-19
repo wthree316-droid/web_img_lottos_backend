@@ -49,7 +49,17 @@ def create_user(request: UserCreate):
             raise HTTPException(status_code=400, detail="Username already exists")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/{user_id}") # ✅ เติม / ให้แล้ว
+# ✅ เพิ่มฟังก์ชันผู้ช่วยลบไฟล์
+def delete_storage_file(url: str):
+    if not url or "lotto-assets/" not in url: 
+        return
+    try:
+        file_path = url.split("lotto-assets/")[1]
+        supabase.storage.from_("lotto-assets").remove([file_path])
+    except Exception as e:
+        print(f"Failed to delete storage file: {e}")
+
+@router.put("/{user_id}")
 def update_user(user_id: str, request: UserUpdate):
     try:
         update_data = {}
@@ -59,11 +69,16 @@ def update_user(user_id: str, request: UserUpdate):
             update_data["assigned_template_id"] = request.assigned_template_id if request.assigned_template_id else None
         if request.allowed_template_ids is not None: 
             update_data["allowed_template_ids"] = request.allowed_template_ids
-        
-        # Support updating custom config
         if hasattr(request, 'custom_line_id') and request.custom_line_id is not None: 
             update_data["custom_line_id"] = request.custom_line_id
+            
+        # ✅ โลจิกทำความสะอาด: ถ้าสมาชิกอัปเดต QR Code ใหม่ ให้ลบอันเก่าทิ้ง
         if hasattr(request, 'custom_qr_code_url') and request.custom_qr_code_url is not None:
+            old_data = execute_supabase(supabase.table("users").select("custom_qr_code_url").eq("id", user_id).limit(1))
+            if old_data.data and old_data.data[0].get("custom_qr_code_url"):
+                old_url = old_data.data[0]["custom_qr_code_url"]
+                if old_url != request.custom_qr_code_url:
+                    delete_storage_file(old_url)
             update_data["custom_qr_code_url"] = request.custom_qr_code_url
             
         if request.is_suspended is not None: 
@@ -74,13 +89,17 @@ def update_user(user_id: str, request: UserUpdate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/{user_id}") # ✅ เติม / ให้แล้ว
+@router.delete("/{user_id}")
 def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):
-    # ✅ ตรวจว่าคนที่ยิงมาเป็น Admin หรือเปล่า
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="คุณไม่มีสิทธิ์ใช้งานส่วนนี้")
 
     try:
+        # ✅ โลจิกทำความสะอาด: ลบรูป QR Code ออกก่อนลบ User
+        old_data = execute_supabase(supabase.table("users").select("custom_qr_code_url").eq("id", user_id).limit(1))
+        if old_data.data and old_data.data[0].get("custom_qr_code_url"):
+            delete_storage_file(old_data.data[0]["custom_qr_code_url"])
+
         execute_supabase(supabase.table("users").delete().eq("id", user_id))
         return {"message": "User deleted successfully"}
     except Exception as e:
